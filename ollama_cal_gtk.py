@@ -3,10 +3,8 @@ import gi
 import sys
 import json
 import caldav
-import requests
+import aiohttp
 import vobject
-import threading
-import certifi
 from datetime import datetime
 from uuid import uuid4
 from typing import Dict, Any, Optional, List, Tuple
@@ -20,6 +18,11 @@ APP_ID = "com.example.ollamacal"
 
 ConfigDict = Dict[str, Any]
 
+import asyncio
+from gi.events import GLibEventLoopPolicy
+# Set up the GLib event loop
+policy = GLibEventLoopPolicy()
+asyncio.set_event_loop_policy(policy)
 
 def load_config() -> Optional[ConfigDict]:
     """Loads configuration from config.json."""
@@ -34,9 +37,9 @@ def load_config() -> Optional[ConfigDict]:
         raise Exception("Error: Could not decode config.json. Please check its format.")
 
 
-def get_event_details_from_llm(text: str, ollama_config: ConfigDict) -> Dict[str, str]:
+async def get_event_details_from_llm(text: str, ollama_config: ConfigDict) -> Dict[str, str]:
     """
-    Sends text to an Ollama server to get structured event details.
+    Sends text to an Ollama server asynchronously to get structured event details.
     Raises exceptions on failure.
     """
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -65,35 +68,34 @@ def get_event_details_from_llm(text: str, ollama_config: ConfigDict) -> Dict[str
         "format": "json",
         "stream": False,
     }
-
+    print(f"Asking {ollama_config['model']} to parse the event...")
     print(f"ollama_api_url: {ollama_api_url}, payload:{payload}")
 
     try:
-        response = requests.post(
-            ollama_api_url, json=payload, verify=certifi.where(), timeout=30
-        )
-        response.raise_for_status()
-        response_json = response.json()
-        event_data: Dict[str, str] = json.loads(response_json.get("response", "{}"))
+        # Use aiohttp for asynchronous HTTP requests
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                ollama_api_url, json=payload, timeout=30
+            ) as response:
+                response.raise_for_status()
+                response_json = await response.json()
+                event_data: Dict[str, str] = json.loads(response_json.get("response", "{}"))
 
-        if not all(k in event_data for k in ["summary", "start", "end"]):
-            raise ValueError(
-                "LLM response is missing required fields (summary, start, end)."
-            )
-
-        return event_data
-    except requests.exceptions.RequestException as e:
+                if not all(k in event_data for k in ["summary", "start", "end"]):
+                    raise ValueError(
+                        "LLM response is missing required fields (summary, start, end)."
+                    )
+                return event_data
+    except aiohttp.ClientError as e:
         raise ConnectionError(f"Error connecting to Ollama server: {e}")
     except (json.JSONDecodeError, ValueError) as e:
         raise ValueError(f"Error processing LLM response: {e}")
 
 
-def create_caldav_event(
-    event_data: Dict[str, str], caldav_config: ConfigDict
-) -> Tuple[bool, str]:
+def _blocking_caldav_create(event_data: Dict[str, str], caldav_config: ConfigDict) -> Tuple[bool, str]:
     """
-    Creates a new event on the specified CalDAV server.
-    Returns a tuple of (success, message).
+    Synchronous helper function to create a CalDAV event.
+    This will be run in a separate thread by asyncio.to_thread.
     """
     cal_event_obj = vobject.iCalendar()
     event = cal_event_obj.add("vevent")
@@ -140,11 +142,26 @@ def create_caldav_event(
                 f"Calendar '{calendar_name}' not found. Available: {available}",
             )
 
-        event_result = target_calendar.save_event(ical=cal_event_obj.serialize())
+        target_calendar.save_event(ical=cal_event_obj.serialize())
         return True, f"Event '{event_data['summary']}' created successfully!"
 
     except Exception as e:
+        # Log the full traceback for debugging
+        traceback.print_exc()
         return False, f"A CalDAV error occurred: {e}"
+
+async def create_caldav_event_async(
+    event_data: Dict[str, str], caldav_config: ConfigDict
+) -> Tuple[bool, str]:
+    """
+    Asynchronously creates a new event on the specified CalDAV server by
+    running the synchronous caldav code in a thread pool.
+    """
+    # asyncio.to_thread is the modern way to run blocking I/O code
+    # in an async application without blocking the event loop.
+    return await asyncio.to_thread(
+        _blocking_caldav_create, event_data, caldav_config
+    )
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -171,7 +188,6 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.window_box.append(self.header)
 
-        # Using Adw.Clamp for a responsive, centered layout
         self.clamp = Adw.Clamp()
         self.clamp.set_child(self.main_box)
         self.window_box.append(self.clamp)
@@ -226,16 +242,16 @@ class MainWindow(Adw.ApplicationWindow):
             orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.END
         )
         self.clear_button = Gtk.Button(label="Clear")
+        self.clear_button.add_css_class("pill")
         self.clear_button.connect("clicked", self.on_clear_clicked)
         self.create_button = Gtk.Button(label="Create Event")
-        self.create_button.add_css_class("pill")  # Use "pill" for distinct group
-        self.create_button.add_css_class("destructive-action")  # Color it
+        self.create_button.add_css_class("pill")
+        self.create_button.add_css_class("destructive-action")
         self.create_button.connect("clicked", self.on_create_clicked)
         self.confirm_box.append(self.clear_button)
         self.confirm_box.append(self.create_button)
         self.results_box.append(self.confirm_box)
 
-        # Load configuration and check it
         self.check_config()
 
     def check_config(self):
@@ -246,7 +262,7 @@ class MainWindow(Adw.ApplicationWindow):
                 raise Exception("'ollama' or 'caldav' section missing in config.json")
         except Exception as e:
             self.show_error_dialog("Configuration Error", str(e))
-            self.main_box.set_sensitive(False)  # Disable the UI
+            self.main_box.set_sensitive(False)
 
     def show_error_dialog(self, title, message):
         """Displays a modal error dialog."""
@@ -264,14 +280,20 @@ class MainWindow(Adw.ApplicationWindow):
         """Displays a short-lived toast message."""
         self.toast_overlay.add_toast(Adw.Toast(title=message, timeout=4))
 
-    def set_busy(self, busy: bool):
+    def set_busy(self, busy: bool, is_creating: bool = False):
         """Toggle the UI busy state."""
         self.spinner.set_spinning(busy)
         self.spinner.set_visible(busy)
-        self.parse_button.set_sensitive(not busy)
         self.text_view.set_editable(not busy)
-        if busy:
-            self.results_box.set_visible(False)  # Hide results while busy
+
+        # If we are creating, keep the parse button disabled
+        if is_creating:
+            self.parse_button.set_sensitive(not busy)
+            self.confirm_box.set_sensitive(not busy)
+        else:
+            self.parse_button.set_sensitive(not busy)
+            if busy:
+                self.results_box.set_visible(False)
 
     def _reset_ui(self):
         """Resets the UI to its initial state."""
@@ -281,82 +303,61 @@ class MainWindow(Adw.ApplicationWindow):
         self.json_label.set_text("")
         self.parse_button.set_sensitive(True)
 
-    # --- Signal Handlers & Threading ---
+    # --- Signal Handlers & Async Tasks ---
 
     def on_clear_clicked(self, button: Gtk.Button):
         self._reset_ui()
 
     def on_parse_clicked(self, button: Gtk.Button):
+        """Synchronous signal handler that schedules the async task."""
         buffer = self.text_view.get_buffer()
         text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
         if not text.strip():
             self.show_toast("Please enter an event description.")
             return
+        # Schedule the async method to run on the event loop
+        asyncio.create_task(self.do_parse_work(text))
 
+    async def do_parse_work(self, text: str):
+        """Asynchronous worker for Ollama API call."""
         self.set_busy(True)
-        thread = threading.Thread(target=self._do_parse_work, args=(text,))
-        thread.daemon = True
-        thread.start()
-
-    def _do_parse_work(self, text: str):
-        """Worker thread for Ollama API call."""
         try:
-            result = get_event_details_from_llm(text, self.config["ollama"])
-            GLib.idle_add(self._on_parse_finished, result, None)
-        except Exception as e:
-            # Log the full traceback in the worker thread for debugging
-            print("--- PARSE ERROR ---", file=sys.stderr)
-            traceback.print_exc()
-            print("-------------------", file=sys.stderr)
-            GLib.idle_add(self._on_parse_finished, None, str(e))
-
-    def _on_parse_finished(self, result: Optional[Dict], error: Optional[str]):
-        """Callback run on the main thread after parsing is done."""
-        self.set_busy(False)
-        if error:
-            self.show_toast(f"Parsing Failed: {error}")
-            return
-
-        if result:
+            result = await get_event_details_from_llm(text, self.config["ollama"])
             self.event_details = result
-            # Format JSON with Pango markup for better readability
             formatted_json = json.dumps(self.event_details, indent=2)
             self.json_label.set_markup(
                 f"<tt>{GLib.markup_escape_text(formatted_json)}</tt>"
             )
             self.results_box.set_visible(True)
+        except Exception as e:
+            traceback.print_exc()
+            self.show_toast(f"Parsing Failed: {e}")
+        finally:
+            self.set_busy(False)
 
     def on_create_clicked(self, button):
+        """Synchronous signal handler that schedules the async task."""
         if not self.event_details:
             return
+        asyncio.create_task(self.do_create_work())
 
-        self.confirm_box.set_sensitive(False)  # Disable create/clear buttons
-        self.spinner.set_spinning(True)
-        self.spinner.set_visible(True)
-
-        thread = threading.Thread(target=self._do_create_work)
-        thread.daemon = True
-        thread.start()
-
-    def _do_create_work(self):
-        """Worker thread for CalDAV event creation."""
-        success, message = create_caldav_event(
-            self.event_details, self.config["caldav"]
-        )
-        GLib.idle_add(self._on_create_finished, success, message)
-
-    def _on_create_finished(self, success: bool, message: str):
-        """Callback run on the main thread after creation attempt."""
-        self.spinner.set_spinning(False)
-        self.spinner.set_visible(False)
-        self.confirm_box.set_sensitive(True)
-
-        if success:
-            self.show_toast(message)
-            self._reset_ui()
-        else:
-            # Show a dialog for creation failures
-            self.show_error_dialog("Event Creation Failed", message)
+    async def do_create_work(self):
+        """Asynchronous worker for CalDAV event creation."""
+        self.set_busy(True, is_creating=True)
+        try:
+            success, message = await create_caldav_event_async(
+                self.event_details, self.config["caldav"]
+            )
+            if success:
+                self.show_toast(message)
+                self._reset_ui()
+            else:
+                self.show_error_dialog("Event Creation Failed", message)
+        except Exception as e:
+            traceback.print_exc()
+            self.show_error_dialog("Event Creation Failed", str(e))
+        finally:
+            self.set_busy(False, is_creating=True)
 
 
 class OllamaCalApp(Adw.Application):
@@ -364,13 +365,10 @@ class OllamaCalApp(Adw.Application):
         super().__init__(application_id="com.example.ollamacal", **kwargs)
         self.connect("activate", self.on_activate)
 
-        # --- Define Application Actions (New) ---
-        # Define an action for 'quit'
         quit_action = Gio.SimpleAction.new("quit", None)
         quit_action.connect("activate", self.on_quit)
         self.add_action(quit_action)
 
-        # Define an action for 'about'
         about_action = Gio.SimpleAction.new("about", None)
         about_action.connect("activate", self.on_about)
         self.add_action(about_action)
@@ -387,7 +385,7 @@ class OllamaCalApp(Adw.Application):
         about = Adw.AboutWindow(
             transient_for=self.win,
             application_name="Ollama Cal",
-            application_icon=APP_ID,  # The icon name should match the app ID
+            application_icon=APP_ID,
             developer_name="Your Name",
             version=__version__,
             comments="Create calendar events from natural language using Ollama and CalDAV.",
@@ -399,5 +397,12 @@ class OllamaCalApp(Adw.Application):
 
 
 if __name__ == "__main__":
+    # PyGObject's GLib main loop integrates with asyncio by default.
+    # However, we explicitly get the event loop here to ensure it's created and
+    # set on the main thread before the GTK application runs. This allows the
+    # GLib main loop to hook into the existing asyncio loop, preventing the
+    # "no running event loop" RuntimeError when scheduling async tasks.
+    # loop = asyncio.new_event_loop()
+    # asyncio.set_event_loop(loop)
     app = OllamaCalApp()
     sys.exit(app.run(sys.argv))

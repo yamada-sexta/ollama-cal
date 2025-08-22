@@ -5,9 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aiohttp>=3.12.15",
     "caldav>=2.0.1",
-    "certifi>=2025.8.3",
-    "httpx>=0.28.1",
     "pygobject>=3.52.3",
     "pygobject-stubs>=2.13.0",
     "vobject>=0.9.9",
