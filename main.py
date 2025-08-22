@@ -6,9 +6,7 @@ from datetime import datetime
 from uuid import uuid4
 from typing import Dict, Any, Optional, List
 
-# A type alias for clarity
 ConfigDict = Dict[str, Any]
-
 
 def load_config() -> Optional[ConfigDict]:
     """Loads configuration from config.json."""
