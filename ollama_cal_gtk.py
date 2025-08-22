@@ -195,7 +195,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.toast_overlay.set_child(self.window_box)
         self.set_content(self.toast_overlay)
 
-        # 1. Input Area
+        # Input Area
         input_label = Gtk.Label(label="Enter event description:", xalign=0, yalign=0.5)
         input_label.add_css_class("title-4")
         self.main_box.append(input_label)
@@ -208,7 +208,7 @@ class MainWindow(Adw.ApplicationWindow):
         scrolled_window.set_child(self.text_view)
         self.main_box.append(scrolled_window)
 
-        # 2. Action Buttons and Spinner
+        # Action Buttons and Spinner
         self.action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.parse_button = Gtk.Button(
             label="Parse Event Details", halign=Gtk.Align.START
@@ -221,23 +221,65 @@ class MainWindow(Adw.ApplicationWindow):
         self.action_box.append(self.spinner)
         self.main_box.append(self.action_box)
 
-        # 3. Results Area (initially hidden)
+        # Results Area (initially hidden)
+        # self.results_box = Gtk.Box(
+        #     orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False
+        # )
+        # self.main_box.append(self.results_box)
+
+        # results_label = Gtk.Label(label="Parsed Event Details", xalign=0)
+        # results_label.add_css_class("title-4")
+        # self.results_box.append(results_label)
         self.results_box = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False
+            orientation=Gtk.Orientation.VERTICAL, spacing=12, visible=False
         )
         self.main_box.append(self.results_box)
 
-        results_label = Gtk.Label(label="Parsed Event Details", xalign=0)
-        results_label.add_css_class("title-4")
-        self.results_box.append(results_label)
+        # --- New Editable Event Card using Adwaita Widgets ---
+        preferences_group = Adw.PreferencesGroup(title="Parsed Event Details")
+        self.results_box.append(preferences_group)
 
-        self.json_label = Gtk.Label(xalign=0, selectable=True)
-        self.json_label.add_css_class("monospace")
-        frame = Gtk.Frame()
-        frame.set_child(self.json_label)
-        self.results_box.append(frame)
+        # Summary (Title)
+        self.summary_row = Adw.EntryRow(title="Summary")
+        preferences_group.add(self.summary_row)
 
-        # 4. Confirmation Buttons (initially hidden)
+        # Start Time
+        self.start_row = Adw.EntryRow(title="Start")
+        preferences_group.add(self.start_row)
+
+        # End Time
+        self.end_row = Adw.EntryRow(title="End")
+        preferences_group.add(self.end_row)
+
+        # Location
+        self.location_row = Adw.EntryRow(title="Location")
+        # Create a Gtk.Image and add it as a prefix
+        location_icon = Gtk.Image.new_from_icon_name("location-services-active-symbolic")
+        self.location_row.add_prefix(location_icon)
+        preferences_group.add(self.location_row)
+
+        # Description
+        # self.description_row = Adw.ExpanderRow(title="Description", subtitle="Event details")
+        # description_icon = Gtk.Image.new_from_icon_name("format-justify-left-symbolic")
+        # self.description_row.add_prefix(description_icon)
+        # self.description_view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, height_request=100)
+        # desc_scroll = Gtk.ScrolledWindow()
+        # desc_scroll.set_child(self.description_view)
+        # self.description_row.add_row(desc_scroll)
+        # preferences_group.add(self.description_row)
+        self.description_row = Adw.EntryRow(title="Description")
+        description_icon = Gtk.Image.new_from_icon_name("format-justify-left-symbolic")
+        self.description_row.add_prefix(description_icon)
+        preferences_group.add(self.description_row)
+
+        # Recurrence Rule
+        self.rrule_row = Adw.EntryRow(title="Recurrence")
+        rrule_icon = Gtk.Image.new_from_icon_name("media-playlist-repeat-symbolic")
+        self.rrule_row.add_prefix(rrule_icon)
+        preferences_group.add(self.rrule_row)
+        # --- End of Event Card ---
+        
+        # Confirmation Buttons (initially hidden)
         self.confirm_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.END
         )
@@ -300,7 +342,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.event_details = None
         self.text_view.get_buffer().set_text("", -1)
         self.results_box.set_visible(False)
-        self.json_label.set_text("")
+        # Clear entry rows
+        self.summary_row.set_text("")
+        self.start_row.set_text("")
+        self.end_row.set_text("")
+        self.location_row.set_text("")
+        # self.description_view.get_buffer().set_text("", -1)
+        self.description_row.set_text("")
+        self.rrule_row.set_text("")
         self.parse_button.set_sensitive(True)
 
     # --- Signal Handlers & Async Tasks ---
@@ -323,12 +372,24 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_busy(True)
         try:
             result = await get_event_details_from_llm(text, self.config["ollama"])
-            self.event_details = result
-            formatted_json = json.dumps(self.event_details, indent=2)
-            self.json_label.set_markup(
-                f"<tt>{GLib.markup_escape_text(formatted_json)}</tt>"
-            )
+            print(f"Parsed event details: {json.dumps(result, indent=2)}") # Print result to console
+
+            # --- Populate the Editable Event Card ---
+            self.summary_row.set_text(result.get("summary", ""))
+            self.start_row.set_text(result.get("start", ""))
+            self.end_row.set_text(result.get("end", ""))
+            self.location_row.set_text(result.get("location", ""))
+            # self.description_view.get_buffer().set_text(result.get("description", ""), -1)
+            self.description_row.set_text(result.get("description", ""))
+            self.rrule_row.set_text(result.get("rrule", ""))
+
+            # Show/hide rows based on content
+            self.location_row.set_visible(bool(result.get("location")))
+            self.description_row.set_visible(bool(result.get("description")))
+            self.rrule_row.set_visible(bool(result.get("rrule")))
+            
             self.results_box.set_visible(True)
+
         except Exception as e:
             traceback.print_exc()
             self.show_toast(f"Parsing Failed: {e}")
