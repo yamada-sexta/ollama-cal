@@ -179,11 +179,23 @@ def main() -> None:
 
     event_details = get_event_details_from_llm(text, ollama_conf)
 
-    if event_details:
-        print("\n--- Parsed Event Details ---")
-        print(json.dumps(event_details, indent=2))
-        print("--------------------------\n")
-        create_caldav_event(event_details, caldav_conf)
+    if not event_details:
+        print("\nNo Event Details...")
+        return
+
+    
+    print("\n--- Parsed Event Details ---")
+    print(json.dumps(event_details, indent=2))
+    print("--------------------------\n")
+    try:
+        confirm = input("Does this look correct? (y/n): ").lower().strip()
+        if confirm.startswith("y"):
+            create_caldav_event(event_details, caldav_conf)
+        else:
+            print("Event creation cancelled by user.")
+    except KeyboardInterrupt:
+        print("\nEvent creation cancelled by user.")
+
 
 
 if __name__ == "__main__":
