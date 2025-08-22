@@ -1,4 +1,4 @@
-# Natural Language to CalDAV Event 🗓️
+# Ollama Cal
 
 A simple Python script that creates calendar events on a CalDAV server from natural language. It uses a local [Ollama](https://ollama.com/) instance to parse the text, keeping your data private.
 
