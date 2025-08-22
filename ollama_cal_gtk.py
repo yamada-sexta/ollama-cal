@@ -220,16 +220,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.action_box.append(self.parse_button)
         self.action_box.append(self.spinner)
         self.main_box.append(self.action_box)
-
-        # Results Area (initially hidden)
-        # self.results_box = Gtk.Box(
-        #     orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False
-        # )
-        # self.main_box.append(self.results_box)
-
-        # results_label = Gtk.Label(label="Parsed Event Details", xalign=0)
-        # results_label.add_css_class("title-4")
-        # self.results_box.append(results_label)
         self.results_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=12, visible=False
         )
@@ -257,16 +247,7 @@ class MainWindow(Adw.ApplicationWindow):
         location_icon = Gtk.Image.new_from_icon_name("location-services-active-symbolic")
         self.location_row.add_prefix(location_icon)
         preferences_group.add(self.location_row)
-
-        # Description
-        # self.description_row = Adw.ExpanderRow(title="Description", subtitle="Event details")
-        # description_icon = Gtk.Image.new_from_icon_name("format-justify-left-symbolic")
-        # self.description_row.add_prefix(description_icon)
-        # self.description_view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, height_request=100)
-        # desc_scroll = Gtk.ScrolledWindow()
-        # desc_scroll.set_child(self.description_view)
-        # self.description_row.add_row(desc_scroll)
-        # preferences_group.add(self.description_row)
+        
         self.description_row = Adw.EntryRow(title="Description")
         description_icon = Gtk.Image.new_from_icon_name("format-justify-left-symbolic")
         self.description_row.add_prefix(description_icon)
@@ -288,7 +269,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.clear_button.connect("clicked", self.on_clear_clicked)
         self.create_button = Gtk.Button(label="Create Event")
         self.create_button.add_css_class("pill")
-        self.create_button.add_css_class("destructive-action")
+        self.create_button.add_css_class("suggested-action")
         self.create_button.connect("clicked", self.on_create_clicked)
         self.confirm_box.append(self.clear_button)
         self.confirm_box.append(self.create_button)
