@@ -1,0 +1,38 @@
+app-id: org.example.OllamaCal
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+command: ollama-cal
+
+finish-args:
+  # Display permissions
+  - --socket=wayland
+  - --socket=fallback-x11
+  # Sound (if needed)
+  - --socket=pulseaudio
+  # Access to home directory files
+  - --filesystem=home
+  # Network access (important for your case)
+  - --share=network
+build-options:
+  build-args:
+    - --share=network
+    - --filesystem=host
+modules:
+  - name: ollama-cal
+    buildsystem: simple
+    build-commands:
+      # Install uv into Flatpak build env
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      # Install dependencies into Flatpak prefix
+      - $HOME/.local/bin/uv sync --frozen --prefix=${FLATPAK_DEST}
+      # Copy source code into Flatpak prefix
+      - cp -r . ${FLATPAK_DEST}/app
+      # Install wrapper script (make sure it runs from the right path)
+      - install -Dm755 ollama-cal ${FLATPAK_DEST}/bin/ollama-cal
+      # Install desktop entry + icon
+      - install -Dm644 org.example.OllamaCal.desktop ${FLATPAK_DEST}/share/applications/org.example.OllamaCal.desktop
+      - install -Dm644 icons/ollama-cal.png ${FLATPAK_DEST}/share/icons/hicolor/64x64/apps/org.example.OllamaCal.png
+    sources:
+      - type: dir
+        path: .

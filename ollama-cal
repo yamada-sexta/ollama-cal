@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#!/bin/sh
+exec ${FLATPAK_DEST}/bin/python3 ${FLATPAK_DEST}/gui.py "$@"
