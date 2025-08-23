@@ -20,9 +20,12 @@ ConfigDict = Dict[str, Any]
 
 import asyncio
 from gi.events import GLibEventLoopPolicy
+
 # Set up the GLib event loop
 policy = GLibEventLoopPolicy()
 asyncio.set_event_loop_policy(policy)
+loop = policy.get_event_loop()
+
 
 def load_config() -> Optional[ConfigDict]:
     """Loads configuration from config.json."""
@@ -37,7 +40,9 @@ def load_config() -> Optional[ConfigDict]:
         raise Exception("Error: Could not decode config.json. Please check its format.")
 
 
-async def get_event_details_from_llm(text: str, ollama_config: ConfigDict) -> Dict[str, str]:
+async def get_event_details_from_llm(
+    text: str, ollama_config: ConfigDict
+) -> Dict[str, str]:
     """
     Sends text to an Ollama server asynchronously to get structured event details.
     Raises exceptions on failure.
@@ -79,7 +84,9 @@ async def get_event_details_from_llm(text: str, ollama_config: ConfigDict) -> Di
             ) as response:
                 response.raise_for_status()
                 response_json = await response.json()
-                event_data: Dict[str, str] = json.loads(response_json.get("response", "{}"))
+                event_data: Dict[str, str] = json.loads(
+                    response_json.get("response", "{}")
+                )
 
                 if not all(k in event_data for k in ["summary", "start", "end"]):
                     raise ValueError(
@@ -92,7 +99,9 @@ async def get_event_details_from_llm(text: str, ollama_config: ConfigDict) -> Di
         raise ValueError(f"Error processing LLM response: {e}")
 
 
-def _blocking_caldav_create(event_data: Dict[str, str], caldav_config: ConfigDict) -> Tuple[bool, str]:
+def _blocking_caldav_create(
+    event_data: Dict[str, str], caldav_config: ConfigDict
+) -> Tuple[bool, str]:
     """
     Synchronous helper function to create a CalDAV event.
     This will be run in a separate thread by asyncio.to_thread.
@@ -150,6 +159,7 @@ def _blocking_caldav_create(event_data: Dict[str, str], caldav_config: ConfigDic
         traceback.print_exc()
         return False, f"A CalDAV error occurred: {e}"
 
+
 async def create_caldav_event_async(
     event_data: Dict[str, str], caldav_config: ConfigDict
 ) -> Tuple[bool, str]:
@@ -159,9 +169,7 @@ async def create_caldav_event_async(
     """
     # asyncio.to_thread is the modern way to run blocking I/O code
     # in an async application without blocking the event loop.
-    return await asyncio.to_thread(
-        _blocking_caldav_create, event_data, caldav_config
-    )
+    return await asyncio.to_thread(_blocking_caldav_create, event_data, caldav_config)
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -244,10 +252,12 @@ class MainWindow(Adw.ApplicationWindow):
         # Location
         self.location_row = Adw.EntryRow(title="Location")
         # Create a Gtk.Image and add it as a prefix
-        location_icon = Gtk.Image.new_from_icon_name("location-services-active-symbolic")
+        location_icon = Gtk.Image.new_from_icon_name(
+            "location-services-active-symbolic"
+        )
         self.location_row.add_prefix(location_icon)
         preferences_group.add(self.location_row)
-        
+
         self.description_row = Adw.EntryRow(title="Description")
         description_icon = Gtk.Image.new_from_icon_name("format-justify-left-symbolic")
         self.description_row.add_prefix(description_icon)
@@ -259,7 +269,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.rrule_row.add_prefix(rrule_icon)
         preferences_group.add(self.rrule_row)
         # --- End of Event Card ---
-        
+
         # Confirmation Buttons (initially hidden)
         self.confirm_box = Gtk.Box(
             orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.END
@@ -346,14 +356,17 @@ class MainWindow(Adw.ApplicationWindow):
             self.show_toast("Please enter an event description.")
             return
         # Schedule the async method to run on the event loop
-        asyncio.create_task(self.do_parse_work(text))
+        loop.create_task(self.do_parse_work(text))
 
     async def do_parse_work(self, text: str):
         """Asynchronous worker for Ollama API call."""
         self.set_busy(True)
         try:
             result = await get_event_details_from_llm(text, self.config["ollama"])
-            print(f"Parsed event details: {json.dumps(result, indent=2)}") # Print result to console
+            self.event_details = result
+            print(
+                f"Parsed event details: {json.dumps(result, indent=2)}"
+            )  # Print result to console
 
             # --- Populate the Editable Event Card ---
             self.summary_row.set_text(result.get("summary", ""))
@@ -368,7 +381,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.location_row.set_visible(bool(result.get("location")))
             self.description_row.set_visible(bool(result.get("description")))
             self.rrule_row.set_visible(bool(result.get("rrule")))
-            
+
             self.results_box.set_visible(True)
 
         except Exception as e:
@@ -377,11 +390,13 @@ class MainWindow(Adw.ApplicationWindow):
         finally:
             self.set_busy(False)
 
-    def on_create_clicked(self, button):
+    def on_create_clicked(self, button: Gtk.Button):
         """Synchronous signal handler that schedules the async task."""
         if not self.event_details:
+            print(f"No event detail...")
             return
-        asyncio.create_task(self.do_create_work())
+        print(f"Creating...")
+        loop.create_task(self.do_create_work())
 
     async def do_create_work(self):
         """Asynchronous worker for CalDAV event creation."""
